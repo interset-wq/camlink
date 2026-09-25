@@ -26,9 +26,12 @@
 #include "cmd.h"
 #include "decoder.h"
 #include "display.h"
+#include "icon_data.h"
 #include "osd.h"
 #include "recorder.h"
 #include "tcp_receiver.h"
+#include "ui.h"
+#include "ui_logic.h"
 #include "virtual_cam.h"
 
 namespace fs = std::filesystem;
@@ -44,6 +47,7 @@ struct Options {
     std::string virtualCamPath;
     std::string recordPath;
     bool osdEnabled = true;
+    bool selftestUi = false;
     bool showHelp = false;
 };
 
@@ -110,6 +114,8 @@ bool parseArgs(int argc, char** argv, Options& opt) {
             opt.recordPath = v;
         } else if (arg == "--no-osd") {
             opt.osdEnabled = false;
+        } else if (arg == "--selftest-ui") {
+            opt.selftestUi = true;
         } else if (arg == "--duration") {
             const char* v = value("--duration");
             if (!v) return false;
@@ -138,17 +144,6 @@ bool writePpm(const std::string& path, const DecodedFrame& frame) {
     out.write(reinterpret_cast<const char*>(frame.rgb.data()),
               static_cast<std::streamsize>(frame.rgb.size()));
     return static_cast<bool>(out);
-}
-
-bool needsTranscode(const std::string& path) {
-    std::string ext = fs::path(path).extension().string();
-    for (auto& c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-    return ext == ".mp4" || ext == ".mkv" || ext == ".mov";
-}
-
-std::string replaceExtension(const std::string& path, const std::string& ext) {
-    fs::path p(path);
-    return p.replace_extension(ext).string();
 }
 
 std::string findExecutableInPath(const std::string& fileName) {
@@ -222,6 +217,9 @@ int main(int argc, char** argv) {
         printUsage();
         return 0;
     }
+    if (opt.selftestUi) {
+        return ui_logic::runSelfTest() ? 0 : 1;
+    }
 
     std::string adbPath;
     bool reverseAdded = false;
@@ -254,6 +252,8 @@ int main(int argc, char** argv) {
         if (reverseAdded) adb::removeReverse(opt.port, adbPath);
         return 1;
     }
+    ui::initStyle();  // before the first ImGui frame
+    display.setIcon(kCamLinkIconRgba, CAMLINK_ICON_SIZE, CAMLINK_ICON_SIZE);
 
     FrameSlot slot;
     TcpReceiver receiver;
@@ -273,13 +273,88 @@ int main(int argc, char** argv) {
     VirtualCam virtualCam;
     bool dumpWritten = opt.dumpPath.empty();
 
+    // --- Recording / snapshot / toast state -----------------------------
     Recorder recorder;
-    if (!opt.recordPath.empty()) {
-        // Native MJPEG AVI first; mp4/mkv/mov targets are transcoded at exit.
-        std::string aviPath = needsTranscode(opt.recordPath)
-                                  ? replaceExtension(opt.recordPath, ".avi")
-                                  : opt.recordPath;
-        recorder.setPath(aviPath);
+    std::string cliTarget = opt.recordPath;
+    bool cliConsumed = false;
+    std::string recTargetPath;   // AVI currently/previously written
+    std::string recFinalPath;    // transcode target (e.g. .mp4), "" if none
+    bool recordWanted = false;
+    int64_t recAccumMs = 0;      // accumulated recording time across segments
+    auto recSegStart = std::chrono::steady_clock::now();
+    std::vector<std::pair<std::string, std::string>> pendingTranscodes;
+
+    std::vector<uint8_t> lastRgb;  // latest OSD-burned frame (for snapshots)
+    int lastW = 0, lastH = 0;
+
+    std::string toastText;
+    int64_t toastShownAtMs = 0;
+    auto toast = [&](const std::string& msg) {
+        toastText = msg;
+        toastShownAtMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now()
+                                 .time_since_epoch())
+                             .count();
+        std::cout << msg << std::endl;
+    };
+
+    auto recordingMillis = [&]() -> int64_t {
+        int64_t acc = recAccumMs;
+        if (recordWanted) {
+            acc += std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - recSegStart)
+                       .count();
+        }
+        return acc;
+    };
+
+    auto startRecording = [&]() {
+        auto next = ui_logic::nextRecordPath(cliTarget, cliConsumed,
+                                             ui_logic::nowTimestamp());
+        recorder.setPath(next.first);
+        recTargetPath = next.first;
+        recFinalPath = next.second;
+        recordWanted = true;
+        recSegStart = std::chrono::steady_clock::now();
+        toast("Recording started: " + recTargetPath);
+    };
+
+    auto stopRecording = [&]() {
+        if (!recordWanted) return;
+        recordWanted = false;
+        recAccumMs += std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - recSegStart)
+                          .count();
+        uint64_t segmentFrames = recorder.frameCount();
+        recorder.close();  // logs "wrote N frames ..." (resets for next run)
+        if (segmentFrames > 0 && !recFinalPath.empty()) {
+            pendingTranscodes.push_back({recTargetPath, recFinalPath});
+        }
+        toast("Recording stopped: " + recTargetPath +
+              " (" + std::to_string(segmentFrames) + " frames)");
+    };
+
+    auto doSnapshot = [&]() {
+        if (lastRgb.empty()) {
+            toast("Snapshot: no frame yet");
+            return;
+        }
+        std::string path = ui_logic::snapshotPath(ui_logic::nowTimestamp());
+        if (stbi_write_png(path.c_str(), lastW, lastH, 3, lastRgb.data(),
+                           lastW * 3)) {
+            toast("Snapshot saved: " + path);
+        } else {
+            toast("Snapshot failed: " + path);
+        }
+    };
+
+    auto toggleOsd = [&]() {
+        opt.osdEnabled = !opt.osdEnabled;
+        toast(std::string("Burn-in OSD ") + (opt.osdEnabled ? "on" : "off"));
+    };
+
+    if (!cliTarget.empty()) {
+        startRecording();  // --record starts recording immediately
     }
 
     uint64_t shownFrames = 0;
@@ -290,11 +365,39 @@ int main(int argc, char** argv) {
     auto started = std::chrono::steady_clock::now();
     auto lastFrameAt = started;
 
-    display.setTitle("CamLink | waiting for phone...");
-
     bool quit = false;
     while (!quit) {
         if (display.shouldClose()) quit = true;
+
+        // App-level input (shortcuts + double-click fullscreen).
+        AppEvent ev;
+        while (display.pollAppEvent(ev)) {
+            if (ev.type == AppEvent::Type::KeyDown) {
+                if (display.wantCaptureKeyboard()) continue;
+                switch (ev.key) {
+                    case AppEvent::Key::Record:
+                        if (recordWanted) stopRecording();
+                        else startRecording();
+                        break;
+                    case AppEvent::Key::Snapshot:
+                        doSnapshot();
+                        break;
+                    case AppEvent::Key::Fullscreen:
+                        display.toggleFullscreen();
+                        break;
+                    case AppEvent::Key::Escape:
+                        if (display.isFullscreen()) display.toggleFullscreen();
+                        break;
+                    case AppEvent::Key::OsdToggle:
+                        toggleOsd();
+                        break;
+                    default:
+                        break;
+                }
+            } else if (ev.type == AppEvent::Type::MouseDoubleClick) {
+                if (!display.wantCaptureMouse()) display.toggleFullscreen();
+            }
+        }
 
         if (opt.durationSec > 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -339,7 +442,10 @@ int main(int argc, char** argv) {
                               ts, line2);
                 }
 
-                display.update(frame.rgb.data(), frame.width, frame.height);
+                lastRgb = frame.rgb;
+                lastW = frame.width;
+                lastH = frame.height;
+
                 if (!dumpWritten) {
                     if (writePpm(opt.dumpPath, frame)) {
                         std::cout << "First frame dumped to " << opt.dumpPath
@@ -360,7 +466,7 @@ int main(int argc, char** argv) {
                                              frame.width, frame.height);
                     }
                 }
-                if (recorder.active() || !opt.recordPath.empty()) {
+                if (recordWanted) {
                     if (opt.osdEnabled) {
                         // Overlay is burned into the RGB frame; re-encode it
                         // so the recording contains the OSD too.
@@ -385,6 +491,9 @@ int main(int argc, char** argv) {
                 ++shownFrames;
                 ++fpsFrames;
                 lastFrameAt = std::chrono::steady_clock::now();
+
+                display.uploadFrame(frame.rgb.data(), frame.width,
+                                    frame.height);
             }
         }
 
@@ -396,24 +505,40 @@ int main(int argc, char** argv) {
             fps = fpsFrames * 1000.0 / fpsElapsedMs;
             fpsFrames = 0;
             fpsMark = now;
-
-            std::string title;
-            if (shownFrames == 0) {
-                title = "CamLink | waiting for phone...";
-            } else {
-                auto idleSec = std::chrono::duration_cast<std::chrono::seconds>(
-                                   now - lastFrameAt).count();
-                title = "CamLink | " + std::to_string(shownFrames) + " frames | " +
-                        std::to_string(static_cast<int>(fps + 0.5)) + " fps" +
-                        (recorder.active()
-                             ? " | REC " + std::to_string(recorder.frameCount())
-                             : "") +
-                        (idleSec >= 3 ? " | stalled" : "") +
-                        (decodeFailures ? " | errors " + std::to_string(decodeFailures)
-                                        : "");
-            }
-            display.setTitle(title);
         }
+
+        // Build UI state and present (every iteration — UI animates even
+        // when no new video frame arrived).
+        auto idleMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          now - lastFrameAt)
+                          .count();
+        ui::FrameState st;
+        st.texture = display.videoTexture();
+        st.videoW = lastW;
+        st.videoH = lastH;
+        st.hasFrame = shownFrames > 0;
+        st.fps = fps;
+        st.shownFrames = shownFrames;
+        st.decodeErrors = decodeFailures;
+        st.connected = shownFrames > 0 && idleMs < 3000;
+        st.stalled = shownFrames > 0 && idleMs >= 3000;
+        st.recording = recordWanted;
+        st.recFrames = recorder.frameCount();
+        st.recSeconds = static_cast<int>(recordingMillis() / 1000);
+        st.recTarget = recTargetPath;
+        st.fullscreen = display.isFullscreen();
+        st.osdEnabled = opt.osdEnabled;
+        st.toastText = toastText;
+        st.toastShownAtMs = toastShownAtMs;
+        st.onRecordToggle = [&] {
+            if (recordWanted) stopRecording();
+            else startRecording();
+        };
+        st.onSnapshot = doSnapshot;
+        st.onFullscreen = [&] { display.toggleFullscreen(); };
+        st.onOsdToggle = toggleOsd;
+        st.onQuit = [&] { quit = true; };
+        display.present([&] { ui::draw(st); });
 
         if (!haveFrame) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -423,16 +548,12 @@ int main(int argc, char** argv) {
     receiver.stop();
     virtualCam.close();
 
-    uint64_t recordedFrames = recorder.frameCount();
-    std::string recordedAvi = recorder.path();
-    recorder.close();
-
-    if (needsTranscode(opt.recordPath) && recordedFrames > 0) {
-        if (!convertToMp4(recordedAvi, opt.recordPath)) {
-            std::cout << "Native MJPEG recording kept at: " << recordedAvi << std::endl;
+    if (recordWanted) stopRecording();
+    for (auto& pending : pendingTranscodes) {
+        if (!convertToMp4(pending.first, pending.second)) {
+            std::cout << "Native MJPEG recording kept at: " << pending.first
+                      << std::endl;
         }
-    } else if (recordedFrames > 0) {
-        std::cout << "Recorded video: " << recordedAvi << std::endl;
     }
 
     display.destroy();

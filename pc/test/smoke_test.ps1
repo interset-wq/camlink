@@ -26,6 +26,16 @@ $dump = Join-Path $tmp "frame.ppm"
 $rec = Join-Path $tmp "smoke.avi"
 Remove-Item $out, $err, $dump, $rec -ErrorAction SilentlyContinue
 
+# 0. UI logic self-test (pure functions: record/snapshot paths, toasts)
+$selfOut = & $exe --selftest-ui | Out-String
+$selfExit = $LASTEXITCODE
+Write-Host "--- selftest-ui ---"
+Write-Host $selfOut.Trim()
+if ($selfExit -ne 0 -or $selfOut -notmatch 'SELFTEST-UI: PASS') {
+    Write-Host "SELFTEST-UI: FAIL (exit=$selfExit)"
+    exit 1
+}
+
 $proc = Start-Process -FilePath $exe `
     -ArgumentList "--no-adb", "--duration", "8", "--dump-frame", $dump, "--record", $rec `
     -RedirectStandardOutput $out -RedirectStandardError $err -PassThru

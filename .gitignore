@@ -11,6 +11,9 @@ pc/build/
 *.o
 *.obj
 
+# ImGui window layout (disabled in code, ignore leftovers)
+imgui.ini
+
 # IDE
 .vscode/
 .idea/

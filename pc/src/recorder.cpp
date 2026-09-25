@@ -229,7 +229,13 @@ void Recorder::close() {
     out.flush();
     out.close();
 
-    index.clear();
     std::cout << "Recorder: wrote " << frames << " frames (" << totalBytes
               << " bytes) to " << targetPath << std::endl;
+
+    // Reset so a subsequent recording starts from a clean slate.
+    index.clear();
+    frames = 0;
+    totalBytes = 0;
+    maxChunk = 0;
+    firstMs = lastMs = 0;
 }

@@ -20,12 +20,38 @@ set(SOURCES
     src/adb_helper.cpp
     src/recorder.cpp
     src/osd.cpp
+    src/ui_logic.cpp
+    src/ui.cpp
 )
 
-add_executable(camlink ${SOURCES})
+# Dear ImGui (vendored, header-only library + SDL2/OpenGL3 backends)
+set(IMGUI_SOURCES
+    third_party/imgui/imgui.cpp
+    third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp
+    third_party/imgui/imgui_widgets.cpp
+    third_party/imgui/backends/imgui_impl_sdl2.cpp
+    third_party/imgui/backends/imgui_impl_opengl3.cpp
+)
+
+add_executable(camlink ${SOURCES} ${IMGUI_SOURCES})
+
+# Vendored code: silence warnings from -Wall -Wextra / /W4
+if(MSVC)
+    set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "/W0")
+else()
+    set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
+endif()
+
+target_compile_definitions(camlink PRIVATE
+    PROJECT_VERSION_STRING="${PROJECT_VERSION}"
+)
 
 # stb_image (header-only, vendored in third_party/)
-target_include_directories(camlink PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+target_include_directories(camlink PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_SOURCE_DIR}/third_party/imgui
+)
 
 # SDL2 resolution order:
 #   1. Bundled MinGW devel package in third_party/SDL2 (see setup_deps.ps1)
@@ -68,7 +94,14 @@ endif()
 
 # Platform-specific settings
 if(WIN32)
-    target_link_libraries(camlink PRIVATE ws2_32)
+    target_link_libraries(camlink PRIVATE ws2_32 opengl32)
+
+    # Embed the app icon in the executable (Explorer / taskbar / Alt-Tab)
+    enable_language(RC)
+    # windres treats backslashes as escapes; keep forward slashes.
+    set(CAMLINK_ICO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/res/camlink.ico")
+    configure_file(res/camlink.rc.in "${CMAKE_CURRENT_BINARY_DIR}/camlink.rc" @ONLY)
+    target_sources(camlink PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/camlink.rc")
 endif()
 
 # Copy SDL2.dll next to the executable for the bundled MinGW package
