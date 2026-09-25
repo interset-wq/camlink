@@ -1,0 +1,26 @@
+# Android
+*.apk
+*.aab
+.gradle/
+build/
+local.properties
+*.hprof
+
+# PC build
+pc/build/
+*.o
+*.obj
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies (downloaded)
+pc/third_party/SDL2/
