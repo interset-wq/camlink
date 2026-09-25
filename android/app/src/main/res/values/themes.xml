@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.CamLink" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#FF6200EE</item>
+        <item name="colorPrimaryVariant">#FF3700B3</item>
+        <item name="colorOnPrimary">#FFFFFFFF</item>
+        <item name="colorSecondary">#FF03DAC5</item>
+        <item name="colorSecondaryVariant">#FF018786</item>
+        <item name="colorOnSecondary">#FF000000</item>
+        <item name="android:statusBarColor">#FF1A1A2E</item>
+    </style>
+</resources>
