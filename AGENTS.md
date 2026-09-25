@@ -2,10 +2,14 @@
 
 Stream Android phone camera to PC over USB (ADB + TCP).
 
+User-facing documentation lives in `README.md` (keep both in sync when the
+build steps, CLI flags, or features change).
+
 ## Architecture
 
 - **Android app** (Kotlin): Camera2 API → JPEG encode → TCP push
-- **PC client** (C++): TCP receive → JPEG decode → SDL2 display + virtual camera
+- **PC client** (C++): TCP receive → JPEG decode → ImGui preview (SDL2
+  window + OpenGL texture) + recording/snapshot + virtual camera
 - **Connection**: ADB reverse (`adb reverse tcp:5555 tcp:5555`) — the phone dials
   `127.0.0.1:5555`, and adb routes it to the PC listener. `adb forward` is the
   wrong direction for this design (it would need the PC to dial the phone).
@@ -43,10 +47,14 @@ Dependencies:
 - `pc/third_party/stb_image_write.h` — JPEG encoder, vendored (burned-in OSD
   requires re-encoding frames for recording)
 - `pc/third_party/stb_easy_font.h` — bitmap font for the OSD overlay, vendored
+- `pc/third_party/imgui/` — Dear ImGui (core + SDL2/OpenGL3 backends),
+  vendored/trimmed (tracked in git); UI code in `src/ui*.cpp`
+- `pc/res/`, `pc/tools/gen_icon.ps1` — app icon (`.ico` + `.rc.in`), embedded
+  via windres on Windows
 - `pc/third_party/SDL2/` — SDL2 MinGW devel package, downloaded by
   `setup_deps.ps1` (gitignored)
 - MinGW g++ + CMake (tested: g++ 15.2, CMake 4.4); on Windows also needs
-  `ws2_32` (linked automatically)
+  `ws2_32` + `opengl32` (linked automatically)
 - ffmpeg (optional) — only needed for `--record *.mp4`; native `--record
   *.avi` needs nothing. Install: `winget install Gyan.FFmpeg`
 
@@ -75,7 +83,8 @@ adb reverse tcp:5555 tcp:5555
 ### Smoke test (no phone needed)
 
 ```bash
-pwsh -File pc/test/smoke_test.ps1   # feeds 100 synthetic JPEG frames to camlink
+pwsh -File pc/test/smoke_test.ps1   # selftest-ui + feeds 100 synthetic JPEG
+                                    # frames, asserts recording + OSD overlay
 ```
 
 ### End-to-end test (phone connected)
@@ -94,12 +103,18 @@ pwsh -File pc/test/e2e_test.ps1     # installs APK, taps Start, checks frame cou
 ## Key files
 
 - `android/app/src/main/java/com/intersetwq/camlink/` — Android app source
-- `pc/src/main.cpp` — CLI args, frame slot, render loop
+- `pc/src/main.cpp` — CLI args, frame slot, record/snapshot/toast actions, loop
 - `pc/src/tcp_receiver.cpp` — TCP server, protocol framing
 - `pc/src/decoder.cpp` — JPEG → RGB via stb_image
-- `pc/src/display.cpp` — SDL2 window/renderer/texture
+- `pc/src/display.cpp` — SDL2 window, OpenGL texture, ImGui backends, input
+  → `AppEvent` (shortcuts, double-click fullscreen)
+- `pc/src/ui.cpp` — ImGui frame: menu bar, status bar, toolbar, toasts, theme
+- `pc/src/ui_logic.cpp` — pure UI logic (record/snapshot paths, toasts) +
+  `--selftest-ui` checks
 - `pc/src/adb_helper.cpp` — locate adb, manage `adb reverse`
 - `pc/src/osd.cpp` — burned-in OSD overlay (time, resolution, fps, REC)
 - `pc/src/virtual_cam.cpp` — v4l2loopback output (Linux) / OBS hint (Windows)
+- `pc/src/icon_data.h`, `pc/res/`, `pc/tools/gen_icon.ps1` — window/app icon
 - `pc/setup_deps.ps1` — downloads SDL2 into `third_party/`
 - `pc/third_party/stb_image.h` — JPEG decoder (single header)
+- `pc/third_party/imgui/` — Dear ImGui (vendored)
