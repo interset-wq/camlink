@@ -46,6 +46,10 @@ cd android
 ./gradlew installDebug     # SDK/NDK expected at D:\androidSDK (see AGENTS.md)
 ```
 
+Release APK: `./gradlew assembleRelease`. If `android/app/keystore.properties`
+(gitignored) exists, the APK is signed with that keystore; otherwise the
+release APK is unsigned and cannot be installed.
+
 ### 2. Build the PC client (Windows / MinGW)
 
 ```bash

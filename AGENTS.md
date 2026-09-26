@@ -27,6 +27,7 @@ build steps, CLI flags, or features change).
 ```bash
 cd android
 ./gradlew assembleDebug        # debug APK
+./gradlew assembleRelease      # release APK (signed when android/app/keystore.properties exists)
 ./gradlew installDebug         # install to connected device
 ```
 

@@ -5,6 +5,9 @@
 build/
 local.properties
 *.hprof
+*.keystore
+*.jks
+android/app/keystore.properties
 
 # PC build
 pc/build/
