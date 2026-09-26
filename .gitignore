@@ -33,3 +33,4 @@ pc/third_party/SDL2/
 
 # Temp files (smoke test artifacts, downloads)
 temp/
+__pycache__/

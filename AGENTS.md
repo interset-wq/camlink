@@ -33,12 +33,23 @@ cd android
 
 SDK/NDK path: `D:\androidSDK`
 
-### PC Client (CMake + MinGW)
+### PC Client (CMake)
+
+Windows (MinGW):
 
 ```bash
 pwsh -File pc/setup_deps.ps1   # fetches SDL2 into pc/third_party/SDL2 (once)
 cd pc
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+Linux (uses the system SDL2 instead of `setup_deps.ps1`; Debian/Ubuntu:
+`sudo apt install libsdl2-dev`):
+
+```bash
+cd pc
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
@@ -55,7 +66,7 @@ Dependencies:
 - `pc/third_party/SDL2/` — SDL2 MinGW devel package, downloaded by
   `setup_deps.ps1` (gitignored)
 - MinGW g++ + CMake (tested: g++ 15.2, CMake 4.4); on Windows also needs
-  `ws2_32` + `opengl32` (linked automatically)
+  `ws2_32` + `opengl32`, on Linux `OpenGL::GL` (all linked automatically)
 - ffmpeg (optional) — only needed for `--record *.mp4`; native `--record
   *.avi` needs nothing. Install: `winget install Gyan.FFmpeg`
 
@@ -84,14 +95,17 @@ adb reverse tcp:5555 tcp:5555
 ### Smoke test (no phone needed)
 
 ```bash
-pwsh -File pc/test/smoke_test.ps1   # selftest-ui + feeds 100 synthetic JPEG
-                                    # frames, asserts recording + OSD overlay
+pwsh -File pc/test/smoke_test.ps1   # Windows: selftest-ui + feeds 100 synthetic
+                                    # JPEG frames, asserts recording + OSD overlay
+./pc/test/smoke_test.sh             # Linux: same test (python3 + Pillow)
 ```
 
 ### End-to-end test (phone connected)
 
 ```bash
-pwsh -File pc/test/e2e_test.ps1     # installs APK, taps Start, checks frame count
+pwsh -File pc/test/e2e_test.ps1     # Windows: taps Start, checks frame count
+./pc/test/e2e_test.sh               # Linux: same test (uses adb on PATH or
+                                    # ~/Android/Sdk/platform-tools)
 ```
 
 ### Virtual camera setup
@@ -117,5 +131,8 @@ pwsh -File pc/test/e2e_test.ps1     # installs APK, taps Start, checks frame cou
 - `pc/src/virtual_cam.cpp` — v4l2loopback output (Linux) / OBS hint (Windows)
 - `pc/src/icon_data.h`, `pc/res/`, `pc/tools/gen_icon.ps1` — window/app icon
 - `pc/setup_deps.ps1` — downloads SDL2 into `third_party/`
+- `pc/test/smoke_test.ps1`, `pc/test/smoke_test.sh` + `smoke_test.py` — smoke
+  test, Windows and Linux variants of the same checks
+- `pc/test/e2e_test.ps1`, `pc/test/e2e_test.sh` — end-to-end test (real phone)
 - `pc/third_party/stb_image.h` — JPEG decoder (single header)
 - `pc/third_party/imgui/` — Dear ImGui (vendored)

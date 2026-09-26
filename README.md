@@ -50,12 +50,22 @@ Release APK: `./gradlew assembleRelease`. If `android/app/keystore.properties`
 (gitignored) exists, the APK is signed with that keystore; otherwise the
 release APK is unsigned and cannot be installed.
 
-### 2. Build the PC client (Windows / MinGW)
+### 2. Build the PC client
+
+Windows / MinGW:
 
 ```bash
 pwsh -File pc/setup_deps.ps1       # once: fetches SDL2 into pc/third_party
 cd pc
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+Linux (uses the system SDL2 — Debian/Ubuntu: `sudo apt install libsdl2-dev`):
+
+```bash
+cd pc
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
@@ -83,9 +93,11 @@ cmake --build build -j
 ## Testing
 
 ```bash
-pwsh -File pc/test/smoke_test.ps1   # no phone needed: synthetic frames,
+pwsh -File pc/test/smoke_test.ps1   # Windows, no phone: synthetic frames,
                                     # recording, OSD assertions, UI self-test
-pwsh -File pc/test/e2e_test.ps1     # phone connected: installs APK, checks FPS
+pwsh -File pc/test/e2e_test.ps1     # Windows, phone: taps Start, checks FPS
+./pc/test/smoke_test.sh             # Linux equivalents (bash + python3/Pillow
+./pc/test/e2e_test.sh               # and bash + adb)
 camlink --selftest-ui               # pure UI-logic checks (paths, toasts)
 ```
 
