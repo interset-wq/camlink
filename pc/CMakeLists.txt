@@ -102,6 +102,10 @@ if(WIN32)
     set(CAMLINK_ICO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/res/camlink.ico")
     configure_file(res/camlink.rc.in "${CMAKE_CURRENT_BINARY_DIR}/camlink.rc" @ONLY)
     target_sources(camlink PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/camlink.rc")
+elseif(UNIX)
+    # GL texture upload in display.cpp needs libGL on Linux
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(camlink PRIVATE OpenGL::GL)
 endif()
 
 # Copy SDL2.dll next to the executable for the bundled MinGW package
